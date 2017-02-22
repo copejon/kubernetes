@@ -110,37 +110,24 @@ var _ = framework.KubeDescribe("PersistentVolumes [Volume][Serial]", func() {
 	})
 
 	///////////////////////////////////////////////////////////////////////
-	//				NFS
+	//				HostPath
 	///////////////////////////////////////////////////////////////////////
 	// Testing configurations of a single a PV/PVC pair, multiple evenly paired PVs/PVCs,
 	// and multiple unevenly paired PV/PVCs
 	framework.KubeDescribe("PersistentVolumes:NFS[Flaky]", func() {
 
-		var (
-			nfsServerPod *v1.Pod
-			serverIP     string
-			pvConfig     persistentVolumeConfig
-		)
+		var pvConfig     persistentVolumeConfig
 
 		BeforeEach(func() {
-			framework.Logf("[BeforeEach] Creating NFS Server Pod")
-			nfsServerPod = initNFSserverPod(c, ns)
-			serverIP = nfsServerPod.Status.PodIP
 			framework.Logf("[BeforeEach] Configuring PersistentVolume")
 			pvConfig = persistentVolumeConfig{
-				namePrefix: "nfs-",
+				namePrefix: "hostpath-",
 				pvSource: v1.PersistentVolumeSource{
-					NFS: &v1.NFSVolumeSource{
-						Server:   serverIP,
-						Path:     "/exports",
-						ReadOnly: false,
+					HostPath: &v1.HostPathVolumeSource{
+						Path: "/tmp",
 					},
 				},
 			}
-		})
-
-		AfterEach(func() {
-			deletePodWithWait(f, c, nfsServerPod)
 		})
 
 		Context("with Single PV - PVC pairs", func() {

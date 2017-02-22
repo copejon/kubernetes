@@ -40,7 +40,6 @@ type disruptiveTest struct {
 type kubeletOpt string
 
 const (
-	MinNodes                    = 2
 	NodeStateTimeout            = 1 * time.Minute
 	kStart           kubeletOpt = "start"
 	kStop            kubeletOpt = "stop"
@@ -53,52 +52,23 @@ var _ = framework.KubeDescribe("PersistentVolumes [Volume][Disruptive][Flaky]", 
 	var (
 		c                         clientset.Interface
 		ns                        string
-		nfsServerPod              *v1.Pod
-		nfsPVconfig               persistentVolumeConfig
-		nfsServerIP, clientNodeIP string
-		clientNode                *v1.Node
+		pvConfig persistentVolumeConfig
 	)
 
 	BeforeEach(func() {
 		// To protect the NFS volume pod from the kubelet restart, we isolate it on its own node.
-		framework.SkipUnlessNodeCountIsAtLeast(MinNodes)
 		c = f.ClientSet
 		ns = f.Namespace.Name
 
-		// Start the NFS server pod.
-		framework.Logf("[BeforeEach] Creating NFS Server Pod")
-		nfsServerPod = initNFSserverPod(c, ns)
-
 		framework.Logf("[BeforeEach] Configuring PersistentVolume")
-		nfsServerIP = nfsServerPod.Status.PodIP
-		Expect(nfsServerIP).NotTo(BeEmpty())
-		nfsPVconfig = persistentVolumeConfig{
+		pvConfig = persistentVolumeConfig{
 			namePrefix: "nfs-",
 			pvSource: v1.PersistentVolumeSource{
-				NFS: &v1.NFSVolumeSource{
-					Server:   nfsServerIP,
-					Path:     "/exports",
-					ReadOnly: false,
+				HostPath: &v1.HostPathVolumeSource{
+					Path: "/mnt",
 				},
 			},
 		}
-		// Get the first ready node IP that is not hosting the NFS pod.
-		if clientNodeIP == "" {
-			framework.Logf("Designating test node")
-			nodes := framework.GetReadySchedulableNodesOrDie(c)
-			for _, node := range nodes.Items {
-				if node.Name != nfsServerPod.Spec.NodeName {
-					clientNode = &node
-					clientNodeIP = framework.GetNodeExternalIP(clientNode)
-					break
-				}
-			}
-			Expect(clientNodeIP).NotTo(BeEmpty())
-		}
-	})
-
-	AfterEach(func() {
-		deletePodWithWait(f, c, nfsServerPod)
 	})
 
 	Context("when kubelet restarts", func() {
@@ -111,7 +81,7 @@ var _ = framework.KubeDescribe("PersistentVolumes [Volume][Disruptive][Flaky]", 
 
 		BeforeEach(func() {
 			framework.Logf("Initializing test spec")
-			clientPod, pv, pvc = initTestCase(f, c, nfsPVconfig, ns, clientNode.Name)
+			clientPod, pv, pvc = initTestCase(f, c, pvConfig, ns)
 		})
 
 		AfterEach(func() {
@@ -187,11 +157,10 @@ func testVolumeUnmountsFromDeletedPod(c clientset.Interface, f *framework.Framew
 }
 
 // initTestCase initializes spec resources (pv, pvc, and pod) and returns pointers to be consumed by the test
-func initTestCase(f *framework.Framework, c clientset.Interface, pvConfig persistentVolumeConfig, ns, nodeName string) (*v1.Pod, *v1.PersistentVolume, *v1.PersistentVolumeClaim) {
+func initTestCase(f *framework.Framework, c clientset.Interface, pvConfig persistentVolumeConfig, ns string) (*v1.Pod, *v1.PersistentVolume, *v1.PersistentVolumeClaim) {
 	pv, pvc := createPVPVC(c, pvConfig, ns, false)
 	pod := makePod(ns, pvc.Name)
-	pod.Spec.NodeName = nodeName
-	framework.Logf("Creating nfs client Pod %s on node %s", pod.Name, nodeName)
+	framework.Logf("Creating client Pod %s on node %s", pod.Name)
 	pod, err := c.Core().Pods(ns).Create(pod)
 	Expect(err).NotTo(HaveOccurred())
 	err = framework.WaitForPodRunningInNamespace(c, pod)
