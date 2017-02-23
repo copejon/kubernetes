@@ -56,16 +56,15 @@ var _ = framework.KubeDescribe("PersistentVolumes [Volume][Disruptive][Flaky]", 
 	)
 
 	BeforeEach(func() {
-		// To protect the NFS volume pod from the kubelet restart, we isolate it on its own node.
 		c = f.ClientSet
 		ns = f.Namespace.Name
 
 		framework.Logf("[BeforeEach] Configuring PersistentVolume")
 		pvConfig = persistentVolumeConfig{
-			namePrefix: "nfs-",
+			namePrefix: "hostpath-",
 			pvSource: v1.PersistentVolumeSource{
 				HostPath: &v1.HostPathVolumeSource{
-					Path: "/mnt",
+					Path: "/tmp",
 				},
 			},
 		}
@@ -119,7 +118,7 @@ var _ = framework.KubeDescribe("PersistentVolumes [Volume][Disruptive][Flaky]", 
 // testKubeletRestartsAndRestoresMount tests that a volume mounted to a pod remains mounted after a kubelet restarts
 func testKubeletRestartsAndRestoresMount(c clientset.Interface, f *framework.Framework, clientPod *v1.Pod, pvc *v1.PersistentVolumeClaim, pv *v1.PersistentVolume) {
 	By("Writing to the volume.")
-	file := "/mnt/_SUCCESS"
+	file := "/tmp/_SUCCESS"
 	_, err := podExec(clientPod, "touch "+file)
 	Expect(err).NotTo(HaveOccurred())
 

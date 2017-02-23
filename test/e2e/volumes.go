@@ -431,7 +431,7 @@ var _ = framework.KubeDescribe("Volumes [Feature:Volumes]", func() {
 					},
 					file: "index.html",
 					// Must match content of test/images/volumes-tester/nfs/index.html
-					expectedContent: "Hello from NFS!",
+					expectedContent: "  NFS!",
 				},
 			}
 			testVolumeClient(cs, config, nil, tests)
@@ -795,7 +795,7 @@ var _ = framework.KubeDescribe("Volumes [Feature:Volumes]", func() {
 				},
 			}
 
-			injectHtml(cs, config, tests[0].volume, tests[0].expectedContent)
+			 injectHtml(cs, config, tests[0].volume, tests[0].expectedContent)
 
 			fsGroup := int64(1234)
 			testVolumeClient(cs, config, &fsGroup, tests)
