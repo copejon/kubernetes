@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2017 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,8 +18,6 @@ package storage
 
 import (
 	"fmt"
-	"strings"
-	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -36,18 +34,12 @@ type disruptiveTest struct {
 	testItStmt string
 	runTest    testBody
 }
-type kubeletOpt string
 
 const (
-	MinNodes                    = 2
-	NodeStateTimeout            = 1 * time.Minute
-	kStart           kubeletOpt = "start"
-	kStop            kubeletOpt = "stop"
-	kRestart         kubeletOpt = "restart"
+	MinNodes = 2
 )
 
 var _ = framework.KubeDescribe("PersistentVolumes [Volume][Disruptive][Flaky]", func() {
-
 	f := framework.NewDefaultFramework("disruptive-pv")
 	var (
 		c                         clientset.Interface
@@ -112,7 +104,6 @@ var _ = framework.KubeDescribe("PersistentVolumes [Volume][Disruptive][Flaky]", 
 		framework.DeletePodWithWait(f, c, nfsServerPod)
 	})
 	Context("when kubelet restarts", func() {
-
 		var (
 			clientPod *v1.Pod
 			pv        *v1.PersistentVolume
@@ -161,7 +152,13 @@ func testKubeletRestartsAndRestoresMount(c clientset.Interface, f *framework.Fra
 	Expect(err).NotTo(HaveOccurred())
 
 	By("Restarting kubelet")
-	kubeletCommand(kRestart, c, clientPod)
+	err = framework.KubeletCommand(framework.KubeletRestart, c, clientPod)
+	defer func() {
+		if err != nil {
+			framework.KubeletCommand(framework.KubeletStart, c, clientPod)
+		}
+	}()
+	Expect(err).NotTo(HaveOccurred())
 
 	By("Testing that written file is accessible.")
 	out, err = podExec(clientPod, fmt.Sprintf("cat %s", file))
@@ -183,17 +180,13 @@ func testVolumeUnmountsFromDeletedPod(c clientset.Interface, f *framework.Framew
 	Expect(result.Code).To(BeZero(), fmt.Sprintf("Expected grep exit code of 0, got %s", result.Code))
 
 	By("Stopping the kubelet.")
-	kubeletCommand(kStop, c, clientPod)
-	defer func() {
-		if err != nil {
-			kubeletCommand(kStart, c, clientPod)
-		}
-	}()
+	err = framework.KubeletCommand(framework.KubeletStop, c, clientPod)
+	Expect(err).NotTo(HaveOccurred())
 	By(fmt.Sprintf("Deleting Pod %q", clientPod.Name))
 	err = c.Core().Pods(clientPod.Namespace).Delete(clientPod.Name, &metav1.DeleteOptions{})
 	Expect(err).NotTo(HaveOccurred())
 	By("Starting the kubelet and waiting for pod to delete.")
-	kubeletCommand(kStart, c, clientPod)
+	framework.KubeletCommand(framework.KubeletStart, c, clientPod)
 	err = f.WaitForPodTerminated(clientPod.Name, "")
 	if !apierrs.IsNotFound(err) && err != nil {
 		Expect(err).NotTo(HaveOccurred(), "Expected pod to terminate.")
@@ -247,43 +240,6 @@ func tearDownTestCase(c clientset.Interface, f *framework.Framework, ns string, 
 	framework.DeletePodWithWait(f, c, client)
 	framework.DeletePersistentVolumeClaim(c, pvc.Name, ns)
 	framework.DeletePersistentVolume(c, pv.Name)
-}
-
-// kubeletCommand performs `start`, `restart`, or `stop` on the kubelet running on the node of the target pod and waits
-// for the desired statues..
-// - First issues the command via `systemctl`
-// - If `systemctl` returns stderr "command not found, issues the command via `service`
-// - If `service` also returns stderr "command not found", the test is aborted.
-// Allowed kubeletOps are `kStart`, `kStop`, and `kRestart`
-func kubeletCommand(kOp kubeletOpt, c clientset.Interface, pod *v1.Pod) {
-	nodeIP, err := framework.GetHostExternalAddress(c, pod)
-	Expect(err).NotTo(HaveOccurred())
-	nodeIP = nodeIP + ":22"
-	systemctlCmd := fmt.Sprintf("sudo systemctl %s kubelet", string(kOp))
-	framework.Logf("Attempting `%s`", systemctlCmd)
-	sshResult, err := framework.SSH(systemctlCmd, nodeIP, framework.TestContext.Provider)
-	Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("SSH to Node %q errored.", pod.Spec.NodeName))
-	framework.LogSSHResult(sshResult)
-	if strings.Contains(sshResult.Stderr, "command not found") {
-		serviceCmd := fmt.Sprintf("sudo service kubelet %s", string(kOp))
-		framework.Logf("Attempting `%s`", serviceCmd)
-		sshResult, err = framework.SSH(serviceCmd, nodeIP, framework.TestContext.Provider)
-		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("SSH to Node %q errored.", pod.Spec.NodeName))
-		framework.LogSSHResult(sshResult)
-	}
-	Expect(sshResult.Code).To(BeZero(), "Failed to [%s] kubelet:\n%#v", string(kOp), sshResult)
-	// On restart, waiting for node NotReady prevents a race condition where the node takes a few moments to leave the
-	// Ready state which in turn short circuits WaitForNodeToBeReady()
-	if kOp == kStop || kOp == kRestart {
-		if ok := framework.WaitForNodeToBeNotReady(c, pod.Spec.NodeName, NodeStateTimeout); !ok {
-			framework.Failf("Node %s failed to enter NotReady state", pod.Spec.NodeName)
-		}
-	}
-	if kOp == kStart || kOp == kRestart {
-		if ok := framework.WaitForNodeToBeReady(c, pod.Spec.NodeName, NodeStateTimeout); !ok {
-			framework.Failf("Node %s failed to enter Ready state", pod.Spec.NodeName)
-		}
-	}
 }
 
 // podExec wraps RunKubectl to execute a bash cmd in target pod
